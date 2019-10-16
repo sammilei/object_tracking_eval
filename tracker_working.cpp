@@ -1,3 +1,7 @@
+/** usage: 
+$./Tracker /home/parallels/Desktop/Parallels\ Shared\ Folders/Home/Documents/JPL-Tech/artifact_reporting/Dataset/198_all/198_4cls_train_241/by_class/drill_47/ CSRT bboxes/198_drill.txt 
+**/
+
 #include <opencv2/core/ocl.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/tracking/tldDataset.hpp>
