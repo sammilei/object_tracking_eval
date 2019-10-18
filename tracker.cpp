@@ -11,10 +11,14 @@
 
 #include <fstream>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 using namespace cv;
 using namespace std;
 
 bool debug = false;
+bool debug2 = true;
 
 unsigned int microseconds = 350000;
 int img_w = 424;
@@ -26,9 +30,10 @@ vector<string> bbox_files;
  * for evaluation
  */
 vector<float> ave_iou;
-vector<float> ave_iou_count;
-vector<int> detected_count;
+vector<float> frame_count;
+vector<int> detected_frame_count;
 vector<float> detected_rate;
+vector<float> reinitial_bbox_area;
 float iou_threshold;
 
 vector<std::string> stringSplit(std::string line, std::string delimiter) {
@@ -43,6 +48,17 @@ vector<std::string> stringSplit(std::string line, std::string delimiter) {
   tokens.push_back(line);
 
   return tokens;
+}
+
+int dirExists(const char* path) {
+  struct stat info;
+
+  if (stat(path, &info) != 0)
+    return 0;
+  else if (info.st_mode & S_IFDIR)
+    return 1;
+  else
+    return 0;
 }
 
 vector<string> getFiles(std::string path) {
@@ -80,9 +96,10 @@ float calcIntersection(Rect2d boxA, Rect2d boxB) {
 
 float calcIoU(Rect2d boxA, Rect2d boxB) {
   float interArea = calcIntersection(boxA, boxB);
-  cout << "interArea: " << interArea
-       << " union:" << float(boxA.area() + boxB.area() - interArea) * 1.000
-       << " ";
+  if (debug2)
+    cout << "interArea: " << interArea
+         << " union:" << float(boxA.area() + boxB.area() - interArea) * 1.000
+         << " ";
 
   float IoU = interArea / float(boxA.area() + boxB.area() - interArea);
   if (IoU > 1) {
@@ -129,7 +146,7 @@ Rect2d getGTbb(string path_, std::string class_) {
 
 vector<Rect2d> getReinitialBbox(string path_) {
   ifstream GT_file;
-  vector<Rect2d> initialBbox;
+  vector<Rect2d> initial_bbox;
   GT_file.open(path_);
 
   string line;
@@ -142,14 +159,14 @@ vector<Rect2d> getReinitialBbox(string path_) {
                              stof(in_a_line[3]),
                              stof(in_a_line[4]));
       // Rect2d db(100, 200, 20, 30);
-      initialBbox.push_back(db);
+      initial_bbox.push_back(db);
     }
     GT_file.close();
   } else {
     std::cout << "no such a GT file: " << path_ << endl;
     exit(1);
   }
-  return initialBbox;
+  return initial_bbox;
 }
 
 bool confirmTracker(string trackerType) {
@@ -201,16 +218,24 @@ Ptr<Tracker> createTracker(string trackerType) {
       .str()
 
 int main(int argc, char** argv) {
-  if (argc != 6) {
+  if (argc != 7) {
     std::cout << "argc: " << argc
               << " usage: ./Tracker <folder to images> <Tracker> <labels file> "
+                 "<path_to_save_output_frames>"
                  "<class>"
                  "<iou threshold>\n";
     return -1;
+  } else {
+    cout << argv[1] << endl
+         << argv[2] << endl
+         << argv[3] << endl
+         << argv[4] << endl
+         << argv[5] << endl
+         << argv[6] << endl;
   }
 
   // get the class
-  string class_ = argv[4];
+  string class_ = argv[5];
 
   // Read folder
   // string folder = "/home/parallels/Desktop/Parallels Shared
@@ -218,6 +243,12 @@ int main(int argc, char** argv) {
   string folder_to_images = argv[1];
   vector<string> files = getFiles(folder_to_images);
   if (files.size() == 0) {
+    return -1;
+  }
+
+  string output_path = argv[4];
+  if (!dirExists(output_path.c_str())) {
+    cout << "ERROR: output path doesn't exist.\n";
     return -1;
   }
 
@@ -230,7 +261,7 @@ int main(int argc, char** argv) {
   vector<Rect2d> bboxes = getReinitialBbox(bbox_path); // TODO: error exceptions
 
   try {
-    iou_threshold = stof(argv[5]);
+    iou_threshold = stof(argv[6]);
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
   }
@@ -238,9 +269,10 @@ int main(int argc, char** argv) {
   // initialize a lot of vectors
   for (int i = 0; i < bboxes.size(); i++) {
     ave_iou.push_back(0);
-    ave_iou_count.push_back(0);
-    detected_count.push_back(0);
+    frame_count.push_back(0);
+    detected_frame_count.push_back(0);
     detected_rate.push_back(0);
+    reinitial_bbox_area.push_back(0);
   }
 
   Mat frame;
@@ -259,6 +291,7 @@ int main(int argc, char** argv) {
     bool ok = false;
 
     double timer = (double)getTickCount();
+    float fps;
 
     frame = imread(folder_to_images + '/' + files[i], 1);
 
@@ -283,26 +316,90 @@ int main(int argc, char** argv) {
         init = true;
         ok = true;
         ++reinitial_bbox_count;
+        // for evluation
+        reinitial_bbox_area[reinitial_bbox_count] = bbox.area();
         break;
       }
     }
 
     if (!init) {
+      if (debug2)
+        cout << "in !init: "
+             << "\n";
+      if (debug2)
+      cout << "frame size: " << frame.size() << " bbox: (" << bbox.x << ", "
+           << bbox.y << "), (" << bbox.width << ", " << bbox.height << ")"
+           << endl;
       ok = tracker->update(frame, bbox);
-      ave_iou_count[reinitial_bbox_count] += 1;
-      if (debug)
 
+      if (debug2)
+        cout << "tracker bbox: (" << bbox.x << ", " << bbox.y << "), ("
+             << bbox.width << ", " << bbox.height << ")" << endl;
+      fps = getTickFrequency() / ((double)getTickCount() - timer);
+      frame_count[reinitial_bbox_count] += 1;
+      if (debug)
         std::cout << "x: " << bbox.x << " y:" << bbox.y << " w:" << bbox.width
                   << " h:" << bbox.height << endl;
       if (debug)
         std::cout << "update\n";
     } else {
+      if (debug2)
+        cout << "initial bbox: (" << bbox.x << ", " << bbox.y << "), ("
+             << bbox.width << ", " << bbox.height << ")" << endl;
+
       if (debug)
         std::cout << "init\n";
+      fps = 0;
     }
 
-    float fps = getTickFrequency() / ((double)getTickCount() - timer);
+    if (debug)
+      std::cout << "ok: " << ok << " ";
 
+    if (ok) {
+      if (init) {
+        cv::putText(frame,
+                    "Reinitial",
+                    Point(100, 20),
+                    FONT_HERSHEY_SIMPLEX,
+                    0.75,
+                    Scalar(0, 255, 255),
+                    2);
+        rectangle(frame, bbox, Scalar(0, 255, 255), 2, 1);
+      } else {
+        // Tracking success : Draw the tracked object
+        rectangle(frame, bbox, Scalar(0, 0, 255), 2, 1);
+        // get the GT bbox
+        IoU = (calcIoU(GT_bb, bbox));
+        cout << " iou: " << IoU << " " << files[i] << endl;
+
+        // for evaluation statistics
+        if (IoU >= iou_threshold) {
+          detected_total_fps += fps;
+          detected_total_count++;
+          ave_iou[reinitial_bbox_count] += IoU;
+          detected_frame_count[reinitial_bbox_count] += 1;
+        } else {
+          cv::putText(frame,
+                      "Tracked but IoU<" + to_string(iou_threshold),
+                      Point(100, 20),
+                      FONT_HERSHEY_SIMPLEX,
+                      0.6,
+                      Scalar(255, 0, 255),
+                      2);
+        }
+      }
+    } else {
+      // Tracking failure detected.
+      cv::putText(frame,
+                  "Tracking failure detected",
+                  Point(100, 20),
+                  FONT_HERSHEY_SIMPLEX,
+                  0.65,
+                  Scalar(0, 0, 255),
+                  2);
+    }
+
+    rectangle(frame, GT_bb, Scalar(0, 255, 255), 1, 1); // GT ground truth
     // Display FPS on frame
     cv::putText(frame,
                 "FPS : " + SSTR(int(fps)),
@@ -328,49 +425,17 @@ int main(int argc, char** argv) {
                 0.40,
                 Scalar(255, 255, 255),
                 1);
-    if (debug)
-      std::cout << "ok: " << ok << " ";
-
-    if (ok) {
-      rectangle(frame, GT_bb, Scalar(0, 255, 0), 1, 1); // ground truth
-      if (init) {
-        cv::putText(frame,
-                    "re initial",
-                    Point(100, 20),
-                    FONT_HERSHEY_SIMPLEX,
-                    0.75,
-                    Scalar(0, 255, 255),
-                    2);
-        rectangle(frame, bbox, Scalar(255, 0, 0), 2, 1);
-      } else {
-        // Tracking success : Draw the tracked object
-        rectangle(frame, bbox, Scalar(0, 0, 255), 2, 1);
-        // get the origin bbox
-        IoU = (calcIoU(GT_bb, bbox));
-        cout << " iou: " << IoU << " " << files[i] << " init: " << init << endl;
-
-        // for evaluation statistics
-        if (IoU >= iou_threshold) {
-          detected_total_fps += fps;
-          detected_total_count++;
-          ave_iou[reinitial_bbox_count] += IoU;
-          detected_count[reinitial_bbox_count] += 1;
-        }
-      }
-
-    } else {
-      // Tracking failure detected.
-      cv::putText(frame,
-                  "Tracking failure detected",
-                  Point(100, 20),
-                  FONT_HERSHEY_SIMPLEX,
-                  0.75,
-                  Scalar(0, 0, 255),
-                  2);
-    }
     count++;
 
     cv::imshow("Tracker " + trackerType, frame);
+    string saved_name = output_path + "/" + trackerType + "iou" +
+        to_string(iou_threshold) + " class" + class_ + "_no." + to_string(i);
+    if (init) {
+      saved_name += "_reinitial.jpg";
+    } else {
+      saved_name += ".jpg";
+    }
+    cv::imwrite(saved_name, frame);
     // usleep(microseconds);
 
     // Exit if ESC pressed.
@@ -381,19 +446,47 @@ int main(int argc, char** argv) {
   }
 
   // sort out the statistics
-  cout << "\n\nreport\n";
-  for (int i = 0; i < ave_iou_count.size(); i++) {
-    ave_iou[i] /= ave_iou_count[i];
-    detected_rate[i] = detected_count[i] / ave_iou_count[i];
-    cout << " detected_rate: " << detected_rate[i]
-         << " for # of frames: " << ave_iou_count[i] << endl;
-    cout << "ave iou: " << ave_iou[i]
-         << " for # of frames: " << ave_iou_count[i] << endl;
-    cout << "detected_count: " << detected_count[i];
+  int total_frames = 0;
+  float total_reinitialize_area = 0;
+  float total_ave_detected_rate;
+  float total_ave_iou;
+  for (int i = 0; i < frame_count.size(); i++) {
+    ave_iou[i] /= frame_count[i];
+    detected_rate[i] = detected_frame_count[i] / frame_count[i];
+    total_frames += frame_count[i];
+    total_reinitialize_area += reinitial_bbox_area[i];
+    total_ave_detected_rate += detected_rate[i] * detected_frame_count[i];
+    total_ave_iou += ave_iou[i] * detected_frame_count[i];
   }
 
   // report
+  cout << "=================================================================\n";
+  cout << "Report of Tracker: " << trackerType << endl;
+  cout << "=================================================================\n";
 
+  string classes[4] = {"fire extinguisher", "backpack", "drill", "survivor"};
+  cout << "total frame: " << total_frames
+       << "(except the reinitial frames), IoU threshold: " << iou_threshold
+       << endl
+       << "category: " << class_ << " (maybe: " << classes[stoi(class_)] << ")"
+       << endl;
+
+  std::cout << std::fixed;
+  std::cout << std::setprecision(2);
+  for (int i = 0; i < frame_count.size(); i++) {
+    cout << "size " << i << " --  pixel area: " << reinitial_bbox_area[i]
+         << ", "
+         << "detected rate: " << detected_rate[i]
+         << ", average IoU: " << ave_iou[i] << ", frame:" << frame_count[i]
+         << endl;
+  }
+  cout << "total "
+       << " -- ave pixel area: "
+       << total_reinitialize_area / reinitial_bbox_area.size()
+       << ", detected rate: " << total_ave_detected_rate / total_frames
+       << ", average IoU: " << total_ave_iou / total_frames
+       << endl; // bug: average IoU goes huge sometimes but it will be fine
+                // after a few runs
   cout << "average detection fps: " << detected_total_fps / detected_total_count
        << endl;
 }
