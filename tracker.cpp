@@ -18,7 +18,7 @@ using namespace cv;
 using namespace std;
 
 bool debug = false;
-bool debug2 = true;
+bool debug2 = false;
 
 unsigned int microseconds = 350000;
 int img_w = 424;
@@ -59,6 +59,15 @@ int dirExists(const char* path) {
     return 1;
   else
     return 0;
+}
+
+string addLeadingZero(int i, int len) {
+  string s = to_string(i);
+  int len_left = len - s.size();
+  for (int k = 0; k < len_left; k++) {
+    s = "0" + s;
+  }
+  return s;
 }
 
 vector<string> getFiles(std::string path) {
@@ -174,17 +183,11 @@ bool confirmTracker(string trackerType) {
   string trackerTypes[8] = {
       "BOOSTING", "MIL", "KCF", "TLD", "MEDIANFLOW", "GOTURN", "MOSSE", "CSRT"};
 
-  bool found = false;
-
   for (int i = 0; i < 8; i++) {
-    if (trackerTypes[i] == trackerType) {
-      return found;
-    }
+    if (trackerTypes[i] == trackerType)
+      return true;
   }
-  if (found == false) {
-    printf("Tracker is not found in OpenCV\n");
-    exit;
-  }
+  return false;
 }
 
 Ptr<Tracker> createTracker(string trackerType) {
@@ -253,7 +256,10 @@ int main(int argc, char** argv) {
   }
 
   // create a tracker
-  confirmTracker(argv[2]);
+  if (!confirmTracker(argv[2])) {
+    printf("Tracker is not found in OpenCV\n");
+    exit;
+  }
   string trackerType = argv[2];
   Ptr<Tracker> tracker;
 
@@ -327,9 +333,9 @@ int main(int argc, char** argv) {
         cout << "in !init: "
              << "\n";
       if (debug2)
-      cout << "frame size: " << frame.size() << " bbox: (" << bbox.x << ", "
-           << bbox.y << "), (" << bbox.width << ", " << bbox.height << ")"
-           << endl;
+        cout << "frame size: " << frame.size() << " bbox: (" << bbox.x << ", "
+             << bbox.y << "), (" << bbox.width << ", " << bbox.height << ")"
+             << endl;
       ok = tracker->update(frame, bbox);
 
       if (debug2)
@@ -358,7 +364,7 @@ int main(int argc, char** argv) {
     if (ok) {
       if (init) {
         cv::putText(frame,
-                    "Reinitial",
+                    "Reinitial" + to_string(reinitial_bbox_count + 1),
                     Point(100, 20),
                     FONT_HERSHEY_SIMPLEX,
                     0.75,
@@ -411,8 +417,9 @@ int main(int argc, char** argv) {
 
     // Display frame
     cv::putText(frame,
-                "#" + std::to_string(count),
-                Point(370, 230),
+                "#" + std::to_string(count) + "/" +
+                    std::to_string(files.size()),
+                Point(360, 230),
                 FONT_HERSHEY_SIMPLEX,
                 0.50,
                 Scalar(255, 255, 25),
@@ -429,7 +436,8 @@ int main(int argc, char** argv) {
 
     cv::imshow("Tracker " + trackerType, frame);
     string saved_name = output_path + "/" + trackerType + "iou" +
-        to_string(iou_threshold) + " class" + class_ + "_no." + to_string(i);
+        to_string(iou_threshold) + " class" + class_ + "_no." +
+        addLeadingZero(i, 3);
     if (init) {
       saved_name += "_reinitial.jpg";
     } else {
