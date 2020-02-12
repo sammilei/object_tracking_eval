@@ -75,7 +75,7 @@ Rect2d yoloToDbox(float x, float y, float w, float h) {
   db.x = x * img_w - 0.5 * w;
   db.y = y * img_h - 0.5 * h;
   db.width = w * img_w;
-  db.height = w * img_h;
+  db.height = h * img_h;
   return db;
 }
 

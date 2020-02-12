@@ -17,12 +17,12 @@
 using namespace cv;
 using namespace std;
 
-bool debug = false;
-bool debug2 = false;
+bool debug = true;
+bool debug2 = true;
 
 unsigned int microseconds = 350000;
-int img_w = 424;
-int img_h = 240;
+int img_w = 640;
+int img_h = 480;
 
 vector<string> bbox_files;
 
@@ -138,6 +138,8 @@ Rect2d getGTbb(string path_, std::string class_) {
   if (GT_file.is_open()) {
     while (getline(GT_file, line)) {
       vector<string> in_a_line = stringSplit(line, " ");
+      if(debug)
+      cout << in_a_line << endl;
       if (in_a_line[0] == class_) {
         db = yoloToDbox(stof(in_a_line[1]),
                         stof(in_a_line[2]),
@@ -330,7 +332,7 @@ int main(int argc, char** argv) {
 
     if (!init) {
       if (debug2)
-        cout << "in !init: "
+        cout << "in !init "
              << "\n";
       if (debug2)
         cout << "frame size: " << frame.size() << " bbox: (" << bbox.x << ", "
